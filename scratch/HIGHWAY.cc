@@ -1303,8 +1303,9 @@ main (int argc, char *argv[])
 
     if (PeriodicTraffic)
     {
-      mac->PushNewRRIValue(100);
-      mac->PushNewRRIValue(20);
+      for (uint16_t rri = 1; rri <= std::numeric_limits<uint16_t>::max(); ++rri) {
+        mac->PushNewRRIValue(rri);
+      }
     }
     else if (AperiodicTraffic)
     {

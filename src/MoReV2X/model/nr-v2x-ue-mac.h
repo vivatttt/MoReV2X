@@ -42,7 +42,7 @@
 #include <ns3/packet-burst.h>
 #include "ns3/traced-value.h"
 #include "ns3/trace-source-accessor.h"
-
+#include "aoi-aware-congestion-control/adaptive-rri-algorithm.h"
 
 #include <cctype>
 namespace ns3 {
@@ -228,6 +228,10 @@ private:
   void DoReceiveNistMTLteControlMessage (Ptr<NistLteControlMessage> msg);
   void DoReceiveNistPrLteControlMessage (Ptr<NistLteControlMessage> msg);
   void DoReceiveNistRrLteControlMessage (Ptr<NistLteControlMessage> msg);
+
+  // added to handle adaptive rri algorithm
+  bool m_enableAdaptiveResourceReservation;
+  AdaptiveResourceReservation m_adaptiveResourceReservation;
 
 private:
 

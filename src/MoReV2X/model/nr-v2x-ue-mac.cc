@@ -49,6 +49,8 @@
 #include "nr-v2x-utils.h"
 
 #include <ns3/node-container.h>
+#include "aoi-aware-congestion-control/adaptive-rri-algorithm.h"
+
 
 namespace ns3 {
 
@@ -464,6 +466,11 @@ NrV2XUeMac::GetTypeId (void)
                                         DoubleValue (1.0),
                                         MakeDoubleAccessor (&NrV2XUeMac::m_savingPeriod),
                                         MakeDoubleChecker<double> ())
+    .AddAttribute("EnableAdaptiveResourceReservation",
+                      "Enable the adaptive RRI algorithm for resource selection",
+                      BooleanValue(false),
+                      MakeBooleanAccessor(&NrV2XUeMac::m_enableAdaptiveResourceReservation),
+                      MakeBooleanChecker())
 ;																									;
 	return tid;
 }
@@ -495,7 +502,9 @@ NrV2XUeMac::NrV2XUeMac ()
    m_keepProbability (0.0),
    m_sizeThreshold (0.2),
    m_sensingWindow (1100),
-   m_oneShotGrant (false)
+   m_oneShotGrant (false),
+   m_enableAdaptiveResourceReservation(false),
+   m_adaptiveResourceReservation(100, 0.5)
 {
    NS_LOG_FUNCTION (this);
    
@@ -1269,7 +1278,33 @@ NrV2XUeMac::V2XSelectResources (uint32_t frameNo, uint32_t subframeNo, double pd
            
    if (ReselectionCounter == 0)
    {
-     NS_ASSERT_MSG(false, "Reselection counter = 0, check the CAM trace! Node ID " << m_rnti);
+      if (m_enableAdaptiveResourceReservation)
+        {
+            double pi0 = AdaptiveResourceReservation::CalculateFreeSubchannelRatio(
+                m_sensedReservedCSRMap,       
+                m_BW_RBs,                     
+                m_nsubCHsize,                 
+                m_frameNo,                    
+                m_subframeNo,
+                m_RRIvalues.front(),
+                m_slotDuration
+            );
+            std::vector<uint8_t> neighborRRI = AdaptiveResourceReservation::GetNeighborRRI(m_sensedReservedCSRMap);
+
+            m_AdaptiveResourceReservation.Update(pi0, neighborRRI);
+
+            uint8_t newRRI = m_AdaptiveResourceReservation.GetRRI();
+            double newPersistenceProbability = m_AdaptiveResourceReservation.GetPersistenceProbability();
+
+            SetRRI(newRRI);
+            SetPersistenceProbability(newPersistenceProbability);
+
+            NS_LOG_INFO("Updated RRI to " << newRRI << " and persistence probability to " << newPersistenceProbability);
+        }
+        else
+        {
+            NS_ASSERT_MSG(false, "Reselection counter = 0, check the CAM trace! Node ID " << m_rnti);
+        }
    }
    if (p_rsvp == 0)
    {
