@@ -25,8 +25,8 @@ private:
     static constexpr int DELTA_R = 40;
     static constexpr double P0_INF = 0.3;
     static constexpr double P0_SUP = 0.5;
-    static constexpr int RRI_MIN = 1;
-    static constexpr int RRI_MAX = 1000;
+    static constexpr int RRI_MIN = 20;
+    static constexpr int RRI_MAX = 100;
 };
 
 } // namespace ns3

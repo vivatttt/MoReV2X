@@ -29,6 +29,156 @@
 #include "ns3/nr-v2x-utils.h"
 #include <random>
 #include <ns3/nr-v2x-amc.h>
+#include <memory>
+
+using namespace ns3;
+
+class AoIMetrics {
+public:
+    AoIMetrics(std::string outputPath) : m_outputPath(outputPath) {
+        m_aoiFile.open(m_outputPath + "aoi_values.csv");
+        m_aoiFile << "Time,NodeID,CurrentAoI,PeakAoI" << std::endl;
+        
+        m_statsFile.open(m_outputPath + "aoi_statistics.csv");
+        m_statsFile << "NodeID,AverageAoI,PeakAoI,UpdateCount" << std::endl;
+    }
+    
+    ~AoIMetrics() {
+        CalculateStatistics();
+        m_aoiFile.close();
+        m_statsFile.close();
+    }
+
+    void UpdateAoI(uint32_t nodeId, double currentTime, double generationTime) {
+        NodeAoIStats& stats = m_nodeStats[nodeId];
+        
+        double currentAoI = currentTime - generationTime;
+        stats.currentAoI = currentAoI;
+
+        stats.peakAoI = std::max(stats.peakAoI, currentAoI);
+
+        stats.sumAoI += currentAoI;
+        stats.updateCount++;
+        
+        stats.aoiValues.push_back(currentAoI);
+        stats.lastUpdateTime = currentTime;
+        m_aoiFile << currentTime << "," << nodeId << "," 
+                  << currentAoI << "," << stats.peakAoI << std::endl;
+    }
+
+    void LogCurrentAoI(double simTime) {
+        for (auto& pair : m_nodeStats) {
+            uint32_t nodeId = pair.first;
+            NodeAoIStats& stats = pair.second;
+            
+            double currentAoI = simTime - stats.lastUpdateTime;
+            stats.currentAoI = currentAoI;
+            
+            stats.peakAoI = std::max(stats.peakAoI, currentAoI);
+            
+            m_aoiFile << simTime << "," << nodeId << "," 
+                      << currentAoI << "," << stats.peakAoI << std::endl;
+        }
+    }
+
+private:
+    struct NodeAoIStats {
+        double lastUpdateTime;
+        double currentAoI;
+        double peakAoI;
+        double sumAoI;
+        uint32_t updateCount;
+        std::vector<double> aoiValues;
+        
+        NodeAoIStats() : lastUpdateTime(0), currentAoI(0), 
+                        peakAoI(0), sumAoI(0), updateCount(0) {}
+    };
+
+    void CalculateStatistics() {
+        for (const auto& pair : m_nodeStats) {
+            uint32_t nodeId = pair.first;
+            const NodeAoIStats& stats = pair.second;
+            
+            double averageAoI = stats.updateCount > 0 ? 
+                stats.sumAoI / stats.updateCount : 0;
+            
+            m_statsFile << nodeId << "," 
+                       << averageAoI << "," 
+                       << stats.peakAoI << "," 
+                       << stats.updateCount << std::endl;
+        }
+    }
+
+    std::map<uint32_t, NodeAoIStats> m_nodeStats;
+    std::string m_outputPath;
+    std::ofstream m_aoiFile;
+    std::ofstream m_statsFile;
+};
+
+std::shared_ptr<AoIMetrics> g_aoiMetrics;
+
+class CBRMetrics {
+public:
+    CBRMetrics(std::string outputPath) : m_outputPath(outputPath) {
+        m_cbrFile.open(m_outputPath + "cbr_values.csv");
+        m_cbrFile << "Time,NodeID,CBR" << std::endl;
+        
+        m_statsFile.open(m_outputPath + "cbr_statistics.csv");
+        m_statsFile << "NodeID,AverageCBR,PeakCBR" << std::endl;
+    }
+    
+    ~CBRMetrics() {
+        CalculateStatistics();
+        m_cbrFile.close();
+        m_statsFile.close();
+    }
+
+    void UpdateCBR(uint32_t nodeId, double currentTime, double cbrValue) {
+        NodeCBRStats& stats = m_nodeStats[nodeId];
+
+        cbrValue = std::max(0.0, std::min(1.0, cbrValue));
+
+        stats.currentCBR = cbrValue;
+        stats.peakCBR = std::max(stats.peakCBR, cbrValue);
+        stats.sumCBR += cbrValue;
+        stats.updateCount++;
+        
+        m_cbrFile << currentTime << "," << nodeId << "," 
+                  << cbrValue << std::endl;
+    }
+
+private:
+    struct NodeCBRStats {
+        double currentCBR;
+        double peakCBR;
+        double sumCBR;
+        uint32_t updateCount;
+        
+        NodeCBRStats() : currentCBR(0), peakCBR(0), 
+                        sumCBR(0), updateCount(0) {}
+    };
+
+    void CalculateStatistics() {
+        for (const auto& pair : m_nodeStats) {
+            uint32_t nodeId = pair.first;
+            const NodeCBRStats& stats = pair.second;
+            
+            double averageCBR = stats.updateCount > 0 ? 
+                stats.sumCBR / stats.updateCount : 0;
+            
+            m_statsFile << nodeId << "," 
+                       << averageCBR << "," 
+                       << stats.peakCBR << std::endl;
+        }
+    }
+
+    std::map<uint32_t, NodeCBRStats> m_nodeStats;
+    std::string m_outputPath;
+    std::ofstream m_cbrFile;
+    std::ofstream m_statsFile;
+};
+
+std::shared_ptr<CBRMetrics> g_cbrMetrics;
 
 NS_LOG_COMPONENT_DEFINE ("DebugScript");
 
@@ -84,43 +234,6 @@ std::string FilePath;
 
 bool enableUDPfiles;
 
-uint32_t PacketSizeDistribution(void)
-{
-  int sample = distribution(generator);
-
-  if (sample == 0)
-    return 100;
-  else if (sample == 1)
-    return 300;
-  else 
-    NS_FATAL_ERROR("Unhandled option in PMF");
-
-/*  
-  int nrolls = 1000;
-  std::vector<int> p;
-  for (int i=0; i<nrolls; i++)
-  {
-    int sample = distribution(generator);
-    if (sample == 0)
-      std::cout << "100 B" << std::endl;
-    else if (sample == 1)
-      std::cout << "300 B" << std::endl;
-    else
-     NS_FATAL_ERROR("Unhandled option in PMF");
-    p.push_back(sample);
-  }
-
-  double avg_100=0, avg_300=0;
-  for (std::vector<int>::iterator it = p.begin(); it!=p.end(); it++)
-   if(*it==0)
-     avg_100++;
-   else 
-     avg_300++;
-
-  std::cout << p.size() << "," << avg_100/p.size() << "," << avg_300/p.size() << std::endl;
-
-  return packetSize;*/
-}
 
 void
 UdpClient::Send (void)
@@ -365,7 +478,6 @@ void PacketSink::HandleRead (Ptr<Socket> socket)
   uint64_t rxPacketID = 0;
   uint32_t numHops;
   uint32_t lastReceivedPacketId = 0;
-//  bool rebroadcast = true;
   uint8_t messageType = 0x00;
   uint8_t alreadyReceived = 0;
   bool insideRX;
@@ -381,10 +493,18 @@ void PacketSink::HandleRead (Ptr<Socket> socket)
       break;
     }
     m_totalRx += packet->GetSize ();
-    if(packet->FindFirstMatchingByteTag(rxV2xTag)) // If the packet tag exists, inspect its content
+    if(packet->FindFirstMatchingByteTag(rxV2xTag)) 
     {
       rxPacketID = rxV2xTag.GetIntValue();
       messageType = rxV2xTag.GetMessageType ();       
+      tGenSec = rxV2xTag.GetDoubleValue();
+      genPosX = rxV2xTag.GetGenPosX();
+      genPosY = rxV2xTag.GetGenPosY();
+      
+      if (g_aoiMetrics) {
+        g_aoiMetrics->UpdateAoI(nodeId, Simulator::Now().GetSeconds(), tGenSec);
+      }
+
       // Retrieve node state
       Ptr<LTENodeState> nodeState = Create<LTENodeState> ();
       nodeState = currentNode -> GetObject<LTENodeState> ();
@@ -393,12 +513,7 @@ void PacketSink::HandleRead (Ptr<Socket> socket)
       //Update the last received packet ID
       nodeState -> SetLastRcvPacketId(rxPacketID);
 
-      //NS_LOG_UNCOND("\nOk: " << rxPacketID << ", rebroadcast: " << rebroadcast);
       NS_LOG_UNCOND("\nOk: " << rxPacketID);
-      tGenSec = rxV2xTag.GetDoubleValue();
-      //TXnodeId = rxV2xTag.GetNodeId();
-      genPosX = rxV2xTag.GetGenPosX();
-      genPosY = rxV2xTag.GetGenPosY();
       Ptr<MobilityModel> mobility = GetNode()->GetObject<MobilityModel>();
       Vector currentPos = mobility -> GetPosition(); 
       rxPosX = currentPos.x;
@@ -512,7 +627,39 @@ void Print (NodeContainer VehicleUEs) {
         positFile.close();
 }
 
+void LogAoI(double time) {
+  if (g_aoiMetrics) {
+    g_aoiMetrics->LogCurrentAoI(time);
+    if (time + 0.1 <= simTime) {
+      Simulator::Schedule(Seconds(0.1), &LogAoI, time + 0.1);
+    }
+  }
+}
 
+void LogCBR(double time) {
+  if (g_cbrMetrics) {
+    NodeContainer GlobalContainer = NodeContainer::GetGlobal();
+    for (NodeContainer::Iterator it = GlobalContainer.Begin(); it != GlobalContainer.End(); ++it) {
+      Ptr<Node> node = *it;
+      uint32_t nodeId = node->GetId();
+      
+      if (nodeId == 0) continue;
+
+      Ptr<NistLteUeNetDevice> ueDev = node->GetDevice(0)->GetObject<NistLteUeNetDevice>();
+      if (!ueDev) continue;
+      
+      Ptr<NrV2XUeMac> ueMac = ueDev->GetMac();
+      if (!ueMac) continue;
+      
+      double cbrValue = ueMac->GetCBR();
+      g_cbrMetrics->UpdateCBR(nodeId, time, cbrValue);
+    }
+
+    if (time + 0.1 <= simTime) {
+      Simulator::Schedule(Seconds(0.1), &LogCBR, time + 0.1);
+    }
+  }
+}
 
 int
 main (int argc, char *argv[])
@@ -541,20 +688,20 @@ main (int argc, char *argv[])
   Ptr<UniformRandomVariable> random = CreateObject<UniformRandomVariable>(); 
  
   // Initialize some values
-  uint32_t mcs = 13; // The Modulation and Coding Scheme
+  uint32_t mcs = 14;
   uint32_t pscchLength = 8;
   std::string period="sf40";
   simTime = 100;
   double ueTxPower = 23.0; // [dBm]
-  uint32_t ueCount = 5; // Number of V-UEs 
+  uint32_t ueCount = 50; // Increased number of vehicles
   bool verbose = true;
   enableUDPfiles = false;
   //Default configuration
-  uint16_t OFDM_numerology = 0; //Default value is 0 = 15 KHz SCS
-  uint16_t channelBW = 10; //In MHz, default
+  uint16_t OFDM_numerology = 0;
+  uint16_t channelBW = 10; // Decreased to 10 MHz
   uint16_t channelBW_RBs;
-  uint32_t subchannelSize = 50; //Default
-  uint32_t highwayLength = 5000;
+  uint16_t subchannelSize = 75; // Keep at 75 RBs
+  uint32_t highwayLength = 1000; // Decreased from 5000 to 1000 meters to create more density
 
   bool IBE = false;
 
@@ -574,6 +721,7 @@ main (int argc, char *argv[])
   bool UMH_ReEvaluation = false; //Default
 
   bool VariablePacketSize = false;
+  bool EnableAdaptiveRRI = false; // Add this line
 
   int inputPDB = 0;
 
@@ -598,10 +746,10 @@ main (int argc, char *argv[])
   bool RxCresel = false;
 
 // Change the random run  
-  uint32_t seed = 867; // this is the default seed;
+  uint32_t seed = 1; // Changed from 867 to create different distribution
   uint32_t runNumber = 1; // this is the default run --> this will be overridden shortly...
 
-  UrbanScenario = false;  // Enable the urban scenario channel models
+  UrbanScenario = true;  // Enable the urban scenario channel models
 
   std::map <uint16_t, uint16_t> SCS_factor = {{0,1}, {1,2}, {2,4}, {3,8}};
 
@@ -658,6 +806,8 @@ main (int argc, char *argv[])
 
 
  // cmd.AddValue ("Sens", "The reference sensitivity", RefSensitivity); 
+
+  cmd.AddValue ("AdaptiveRRI", "Enable adaptive RRI selection", EnableAdaptiveRRI); // Add this line
 
   cmd.Parse(argc, argv);
 
@@ -803,6 +953,12 @@ main (int argc, char *argv[])
   system(("rm -r " + outputPath).c_str());
   system(("mkdir " + outputPath).c_str());
 
+  g_aoiMetrics = std::make_shared<AoIMetrics>(outputPath);
+  g_cbrMetrics = std::make_shared<CBRMetrics>(outputPath);
+
+  Simulator::Schedule(Seconds(0.0), &LogAoI, 0.0);
+  Simulator::Schedule(Seconds(0.0), &LogCBR, 0.0);
+
   std::ofstream readme;
   readme.open (outputPath + "simREADME.txt");
   readme << "----------------------" << std::endl;
@@ -910,7 +1066,7 @@ main (int argc, char *argv[])
   Config::SetDefault ("ns3::NrV2XUeMac::AdaptiveScheduling", BooleanValue (AdaptiveSchedulingMode2));
   Config::SetDefault ("ns3::NrV2XUeMac::UMHReEvaluation", BooleanValue (UMH_ReEvaluation));
   Config::SetDefault ("ns3::NrV2XUeMac::FrequencyReuse", BooleanValue (FrequencyReuse));
-  Config::SetDefault ("ns3::NrV2XUeMac::EnableAdaptiveResourceReservation", BooleanValue (true));
+  Config::SetDefault ("ns3::NrV2XUeMac::EnableAdaptiveResourceReservation", BooleanValue (EnableAdaptiveRRI));
 
 
   // Configure Power Control and Phy layer
@@ -1058,21 +1214,14 @@ main (int argc, char *argv[])
 
   Ptr<UniformRandomVariable> laneNumber = CreateObject<UniformRandomVariable>();
   Ptr<UniformRandomVariable> Xposition = CreateObject<UniformRandomVariable>();
-  double laneWidth = 4.0;
+  double laneWidth = 4.0; // Keep lane width the same
 
   Ptr<ListPositionAllocator> positionAlloc = CreateObject <ListPositionAllocator>();
 
-  //int pospos = 1;
-  //GeoCellSize = 8;
   for (NodeContainer::Iterator L = ueResponders.Begin(); L != ueResponders.End(); ++L)
   {  
-    double yPos = laneNumber->GetInteger(1,6)*laneWidth;
-//    double yPos = laneNumber->GetInteger(1,1)*laneWidth; // 1 lane simulation
+    double yPos = laneNumber->GetInteger(1,3)*laneWidth; // Reduced from 6 to 3 lanes to increase density
     double xPos = Xposition->GetValue(0,highwayLength);
-//    double xPos = Xposition->GetValue(0,ReuseDistance);
-//    double xPos = pospos;
-//    pospos += GeoCellSize;
-//    xPos += 2000;
     positionAlloc ->Add(Vector(xPos, yPos, 0)); 
   }
   mobilityUE.SetPositionAllocator(positionAlloc);
@@ -1191,17 +1340,14 @@ main (int argc, char *argv[])
      RndExp = CreateObject<ExponentialRandomVariable> ();
      RndExp_1 = CreateObject<ExponentialRandomVariable> ();
 
-
-//     uint16_t quantizationStep = 100;
-     uint16_t quantizationStep = 200;
-     LargestAperiodicSize = 1200; // Largest packet size for aperiodic traffic
-//     LargestAperiodicSize = 100; // Largest packet size for aperiodic traffic
+     uint16_t quantizationStep = 400; // Increased packet size step
+     LargestAperiodicSize = 1200; // Increased max packet size
      for(uint16_t k = 1; k <= LargestAperiodicSize/quantizationStep; k++)
      {
        if (VariablePacketSize)
          AperiodicPKTs_Size.push_back(k*quantizationStep-35); 
        else
-         AperiodicPKTs_Size.push_back(200-35);  // Valid packet sizes from 100 to 1000 bytes with 100 bytes quantization step
+         AperiodicPKTs_Size.push_back(400-35);  // Increased fixed packet size
      }
 
      for (NodeContainer::Iterator L = ueResponders.Begin(); L != ueResponders.End(); ++L)
@@ -1215,35 +1361,18 @@ main (int argc, char *argv[])
          if (inputPDB != 0)
            PDB_Aperiodic.push_back(inputPDB);
          else
-           PDB_Aperiodic.push_back(10);
-//           PDB_Aperiodic.push_back(10);
-         Aperiodic_Tgen_c.push_back(10);
-//         Aperiodic_Tgen_c.push_back(10);
-         RndExp->SetAttribute ("Mean", DoubleValue(10));
-//         RndExp->SetAttribute ("Mean", DoubleValue(10));
-//         Aperiodic_Tgen_c.push_back(5);
-//         RndExp->SetAttribute ("Mean", DoubleValue(5));
+           PDB_Aperiodic.push_back(5); // Decreased from 10 to 5 to be <= RRI (5ms)
+         Aperiodic_Tgen_c.push_back(5); // RRI = 5ms
+         RndExp->SetAttribute ("Mean", DoubleValue(5));
        }
        else
        {
          if (inputPDB != 0)
            PDB_Aperiodic.push_back(inputPDB);
          else
-           PDB_Aperiodic.push_back(50);
-//           PDB_Aperiodic.push_back(10);
-         Aperiodic_Tgen_c.push_back(50);
-//         Aperiodic_Tgen_c.push_back(10);
-         RndExp_1->SetAttribute ("Mean", DoubleValue(50));
-//         RndExp_1->SetAttribute ("Mean", DoubleValue(10));
-
-//         Aperiodic_Tgen_c.push_back(10);
-//         RndExp_1->SetAttribute ("Mean", DoubleValue(10));
-
-//         Aperiodic_Tgen_c.push_back(5);
-//         RndExp_1->SetAttribute ("Mean", DoubleValue(5));
-
-//         Aperiodic_Tgen_c.push_back(25);
-//         RndExp_1->SetAttribute ("Mean", DoubleValue(25));
+           PDB_Aperiodic.push_back(20); // Decreased from 50 to 20 to be <= RRI (20ms)
+         Aperiodic_Tgen_c.push_back(20); // RRI = 20ms
+         RndExp_1->SetAttribute ("Mean", DoubleValue(20));
        }
      } 
 
@@ -1259,10 +1388,8 @@ main (int argc, char *argv[])
          if (inputPDB != 0)
            PDB_Periodic.push_back(inputPDB);
          else
-           PDB_Periodic.push_back(20);
-//           PDB_Periodic.push_back(20);
-         Periodic_Tgen.push_back(20);
-//         Periodic_Tgen.push_back(20);
+           PDB_Periodic.push_back(10); // Equal to RRI (10ms)
+         Periodic_Tgen.push_back(10); // RRI = 10ms
        }
        else
        {
@@ -1270,15 +1397,13 @@ main (int argc, char *argv[])
            PDB_Periodic.push_back(inputPDB);
          else
            PDB_Periodic.push_back(100);
-//           PDB_Periodic.push_back(20);
-         Periodic_Tgen.push_back(100);
-//         Periodic_Tgen.push_back(20);
+         Periodic_Tgen.push_back(50); // Decreased to 50ms
        }
      } 
 //     PeriodicPKTs_Size = {190-34, 190-34, 190-34, 190-34 ,190-34}; //Account for the overhead
 //     PeriodicPKTs_Size = {300-34, 190-34, 190-34, 190-34 ,190-34}; //Account for the overhead
 //     PeriodicPKTs_Size = {300-34, 300-34, 300-34, 300-34 ,300-34}; //Account for the overhead
-     PeriodicPKTs_Size = {200-35, 200-35, 200-35, 200-35, 200-35}; //Account for the overhead
+     PeriodicPKTs_Size = {400-35, 400-35, 400-35, 400-35, 400-35}; // Increased packet sizes
      LargestPeriodicSize = PeriodicPKTs_Size[0];  // 300 bytes is the largest packet size for aperiodic traffic
 
      Ptr<UniformRandomVariable> random_index = CreateObject<UniformRandomVariable>();
@@ -1308,7 +1433,6 @@ main (int argc, char *argv[])
   //mobility.SetPositionAllocator (positionAlloc);
 
   NS_LOG_INFO ("Installing UE network devices...");
-  std::cout << "aboba";
   NetDeviceContainer ueDevs = lteHelper->InstallUeDevice (ueResponders);
 
   for (NodeContainer::Iterator L = ueResponders.Begin(); L != ueResponders.End(); ++L)
@@ -1512,6 +1636,8 @@ main (int argc, char *argv[])
   /*
     Put code to evaluate KPIs here
   */
+  g_aoiMetrics.reset();
+  g_cbrMetrics.reset();
   Simulator::Destroy ();
 
   NS_LOG_INFO ("Done.");

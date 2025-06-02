@@ -58,6 +58,12 @@ class NrV2XUeMac :   public Object
 public:
   static TypeId GetTypeId (void);
 
+  /**
+   * \brief Get the current Channel Busy Ratio (CBR)
+   * \return The current CBR value between 0 and 1
+   */
+  double GetCBR() const;
+
   NrV2XUeMac ();
   virtual ~NrV2XUeMac ();
   virtual void DoDispose (void);
@@ -699,7 +705,7 @@ private:
   */
   void DoStoreTxInfo (SidelinkCommResourcePool::SubframeInfo subframe, uint16_t rbStart, uint16_t rbLen);
 
-  double CalculateFreeSubchannelRatio(uint16_t rri, uint32_t currentFrameNo, uint32_t currentSubframeNo);
+  double CalculateFreeSubchannelRatio(uint16_t rri, uint32_t currentFrameNo, uint32_t currentSubframeNo) const;
   
   std::vector<uint16_t> GetNeighborRRI();
   

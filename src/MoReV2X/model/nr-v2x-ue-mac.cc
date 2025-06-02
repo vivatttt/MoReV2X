@@ -469,7 +469,7 @@ NrV2XUeMac::GetTypeId (void)
                                         MakeDoubleChecker<double> ())
     .AddAttribute("EnableAdaptiveResourceReservation",
                       "Enable the adaptive RRI algorithm for resource selection",
-                      BooleanValue(true),
+                      BooleanValue(false),
                       MakeBooleanAccessor(&NrV2XUeMac::m_enableAdaptiveResourceReservation),
                       MakeBooleanChecker())
     .AddAttribute("RandomSelection",
@@ -1285,11 +1285,7 @@ NrV2XUeMac::GetNeighborRRI()
 }
 
 double 
-NrV2XUeMac::CalculateFreeSubchannelRatio(
-    uint16_t rri,
-    uint32_t currentFrameNo,
-    uint32_t currentSubframeNo
-) 
+NrV2XUeMac::CalculateFreeSubchannelRatio(uint16_t rri, uint32_t currentFrameNo, uint32_t currentSubframeNo) const
 {
     const uint32_t totalSubchannels = m_BW_RBs / m_nsubCHsize;
     std::vector<uint32_t> subchannelOccupancyCount(totalSubchannels, 0);
@@ -1377,7 +1373,6 @@ NrV2XUeMac::V2XSelectResources (uint32_t frameNo, uint32_t subframeNo, double pd
    NS_ASSERT_MSG(pdb <= p_rsvp, "Packet Delay Budget (PDB) must be lower or equal than the reservation period");
 
    V2XGrant.m_mcs = m_slGrantMcs;
-
    if (!m_enableAdaptiveResourceReservation) {
        V2XGrant.m_RRI = p_rsvp;
    } else {
@@ -1385,12 +1380,12 @@ NrV2XUeMac::V2XSelectResources (uint32_t frameNo, uint32_t subframeNo, double pd
        double pi0 = NrV2XUeMac::CalculateFreeSubchannelRatio(p_rsvp, m_frameNo, m_subframeNo);
        std::vector<uint16_t> neighborRRI = NrV2XUeMac::GetNeighborRRI();
 
-       std::cout << "PI 0: " << pi0;
-       std::cout << std::endl << "NEIGHBOUR RRI:" << std:: endl;
-       for (uint16_t num : neighborRRI) {
-           std::cout << static_cast<int>(num) << " ";
-       }
-       std::cout << std::endl << "--------------" << std:: endl;
+      //  std::cout << "PI 0: " << pi0;
+      //  std::cout << std::endl << "NEIGHBOUR RRI:" << std:: endl;
+      //  for (uint16_t num : neighborRRI) {
+      //      std::cout << static_cast<int>(num) << " ";
+      //  }
+      //  std::cout << std::endl << "--------------" << std:: endl;
 
        uint16_t currentRRI = (m_adaptiveResourceReservation.GetRRI() == 0) ? p_rsvp : m_adaptiveResourceReservation.GetRRI();
        uint16_t newRRI = m_adaptiveResourceReservation.UpdateRRI(currentRRI, pi0, neighborRRI);
@@ -1401,8 +1396,6 @@ NrV2XUeMac::V2XSelectResources (uint32_t frameNo, uint32_t subframeNo, double pd
        std::cout << "CURRENT RRI: " << static_cast<int>(currentRRI) << " NEW RRI: " << static_cast<int>(newRRI) << " NEW PERSISTENECE PROBABLITY " <<  newPersistenceProbability << std::endl;
        NS_LOG_INFO("Updated RRI from " << currentRRI << " to " << newRRI << " and persistence probability to " << newPersistenceProbability);
    }
-   std::cout << "INITIAL RRI: " << p_rsvp << std::endl;
-   std::cout << "IN SELECT RESOURCES" << std::endl;
 
     if (ReselectionCounter == 0)
    {
@@ -4131,6 +4124,13 @@ NrV2XUeMac::GetDiscTxPool ()
   return m_discTxPools.m_pool; 
 }
 
-
+double
+NrV2XUeMac::GetCBR() const
+{
+  // Get current frame and subframe for CBR calculation
+  // Use member variables m_frameNo and m_subframeNo
+  // Default RRI of 100ms for CBR calculation
+  return 1.0 - CalculateFreeSubchannelRatio(100, m_frameNo, m_subframeNo);
+}
 
 } // namespace ns3
