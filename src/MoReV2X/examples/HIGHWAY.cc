@@ -982,7 +982,7 @@ main (int argc, char *argv[])
      RndExp->SetAttribute ("Mean", DoubleValue(Tgen_aperiodic_c));
 
      uint16_t quantizationStep = 200;
-     LargestAperiodicSize = 1200; // Largest packet size for aperiodic traffic
+     LargestAperiodicSize = 1200; 
      for(uint16_t k = 1; k <= LargestAperiodicSize/quantizationStep; k++)
      {
         AperiodicPKTs_Size.push_back(k*quantizationStep-34);  // Valid packet sizes from 100 to 1000 bytes with 100 bytes quantization step

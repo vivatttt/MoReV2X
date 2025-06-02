@@ -303,26 +303,22 @@ UdpClient::Send (void)
         ReservationSize = m_size;
 
         if (avgRRI)
-          v2xTag.SetPrsvp ((double) Aperiodic_Tgen_c[nodeId-1]*2); // average RRI 
+          v2xTag.SetPrsvp ((double) Aperiodic_Tgen_c[nodeId-1]*2);
         else {
-          // Get the MAC layer to check if adaptive RRI is enabled
           Ptr<NrV2XUeMac> ueMac = currentNode->GetObject<NrV2XUeMac>();
           if (ueMac) {
             BooleanValue adaptiveRRI;
             ueMac->GetAttribute("EnableAdaptiveResourceReservation", adaptiveRRI);
             if (adaptiveRRI.Get()) {
-                // First calculate new RRI value
                 double newRRI = ueMac->GetCurrentAdaptiveRRI();
-                // Then set it
                 v2xTag.SetPrsvp(newRRI);
-                // Then log it
                 NS_LOG_UNCOND("Udp: UE " << nodeId << " transmitting packet with size: " << m_size+35 << " B and reserving resources using " << ReservationSize+35 << "B. Adapted RRI " << newRRI << " ms. Next packet in " << T_gen << " ms");
             } else {
-                v2xTag.SetPrsvp ((double) Aperiodic_Tgen_c[nodeId-1]); // minimum RRI
+                v2xTag.SetPrsvp ((double) Aperiodic_Tgen_c[nodeId-1]);
                 NS_LOG_UNCOND("Udp: UE " << nodeId << " transmitting packet with size: " << m_size+35 << " B and reserving resources using " << ReservationSize+35 << "B. Adapted RRI " << v2xTag.GetPrsvp() << " ms. Next packet in " << T_gen << " ms");
             }
           } else {
-            v2xTag.SetPrsvp ((double) Aperiodic_Tgen_c[nodeId-1]); // minimum RRI
+            v2xTag.SetPrsvp ((double) Aperiodic_Tgen_c[nodeId-1]);
             NS_LOG_UNCOND("Udp: UE " << nodeId << " transmitting packet with size: " << m_size+35 << " B and reserving resources using " << ReservationSize+35 << "B. Adapted RRI " << v2xTag.GetPrsvp() << " ms. Next packet in " << T_gen << " ms");
           }
         }
@@ -693,15 +689,15 @@ main (int argc, char *argv[])
   std::string period="sf40";
   simTime = 100;
   double ueTxPower = 23.0; // [dBm]
-  uint32_t ueCount = 50; // Increased number of vehicles
+  uint32_t ueCount = 50;
   bool verbose = true;
   enableUDPfiles = false;
   //Default configuration
   uint16_t OFDM_numerology = 0;
-  uint16_t channelBW = 10; // Decreased to 10 MHz
+  uint16_t channelBW = 10;
   uint16_t channelBW_RBs;
-  uint16_t subchannelSize = 75; // Keep at 75 RBs
-  uint32_t highwayLength = 1000; // Decreased from 5000 to 1000 meters to create more density
+  uint16_t subchannelSize = 75;
+  uint32_t highwayLength = 1000;
 
   bool IBE = false;
 
@@ -721,7 +717,7 @@ main (int argc, char *argv[])
   bool UMH_ReEvaluation = false; //Default
 
   bool VariablePacketSize = false;
-  bool EnableAdaptiveRRI = false; // Add this line
+  bool EnableAdaptiveRRI = false;
 
   int inputPDB = 0;
 
@@ -746,7 +742,7 @@ main (int argc, char *argv[])
   bool RxCresel = false;
 
 // Change the random run  
-  uint32_t seed = 1; // Changed from 867 to create different distribution
+  uint32_t seed = 867;
   uint32_t runNumber = 1; // this is the default run --> this will be overridden shortly...
 
   UrbanScenario = true;  // Enable the urban scenario channel models
@@ -807,7 +803,7 @@ main (int argc, char *argv[])
 
  // cmd.AddValue ("Sens", "The reference sensitivity", RefSensitivity); 
 
-  cmd.AddValue ("AdaptiveRRI", "Enable adaptive RRI selection", EnableAdaptiveRRI); // Add this line
+  cmd.AddValue ("AdaptiveRRI", "Enable adaptive RRI selection", EnableAdaptiveRRI);
 
   cmd.Parse(argc, argv);
 
@@ -1340,14 +1336,14 @@ main (int argc, char *argv[])
      RndExp = CreateObject<ExponentialRandomVariable> ();
      RndExp_1 = CreateObject<ExponentialRandomVariable> ();
 
-     uint16_t quantizationStep = 400; // Increased packet size step
-     LargestAperiodicSize = 1200; // Increased max packet size
+     uint16_t quantizationStep = 400;
+     LargestAperiodicSize = 1200;
      for(uint16_t k = 1; k <= LargestAperiodicSize/quantizationStep; k++)
      {
        if (VariablePacketSize)
          AperiodicPKTs_Size.push_back(k*quantizationStep-35); 
        else
-         AperiodicPKTs_Size.push_back(400-35);  // Increased fixed packet size
+         AperiodicPKTs_Size.push_back(400-35);
      }
 
      for (NodeContainer::Iterator L = ueResponders.Begin(); L != ueResponders.End(); ++L)
@@ -1403,7 +1399,7 @@ main (int argc, char *argv[])
 //     PeriodicPKTs_Size = {190-34, 190-34, 190-34, 190-34 ,190-34}; //Account for the overhead
 //     PeriodicPKTs_Size = {300-34, 190-34, 190-34, 190-34 ,190-34}; //Account for the overhead
 //     PeriodicPKTs_Size = {300-34, 300-34, 300-34, 300-34 ,300-34}; //Account for the overhead
-     PeriodicPKTs_Size = {400-35, 400-35, 400-35, 400-35, 400-35}; // Increased packet sizes
+     PeriodicPKTs_Size = {400-35, 400-35, 400-35, 400-35, 400-35}; 
      LargestPeriodicSize = PeriodicPKTs_Size[0];  // 300 bytes is the largest packet size for aperiodic traffic
 
      Ptr<UniformRandomVariable> random_index = CreateObject<UniformRandomVariable>();
