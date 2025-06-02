@@ -42,6 +42,7 @@
 #include <bitset>
 #include <cmath>
 #include <algorithm>
+#include <cstdint>
 
 #include <iostream>
 #include <fstream>
@@ -49,7 +50,7 @@
 #include "nr-v2x-utils.h"
 
 #include <ns3/node-container.h>
-#include "aoi-aware-congestion-control/adaptive-rri-algorithm.h"
+#include "aoi-aware-congestion-control.h"
 
 
 namespace ns3 {
@@ -468,8 +469,13 @@ NrV2XUeMac::GetTypeId (void)
                                         MakeDoubleChecker<double> ())
     .AddAttribute("EnableAdaptiveResourceReservation",
                       "Enable the adaptive RRI algorithm for resource selection",
-                      BooleanValue(false),
+                      BooleanValue(true),
                       MakeBooleanAccessor(&NrV2XUeMac::m_enableAdaptiveResourceReservation),
+                      MakeBooleanChecker())
+    .AddAttribute("RandomSelection",
+                      "Enable random resource selection instead of sensing-based selection",
+                      BooleanValue(false),
+                      MakeBooleanAccessor(&NrV2XUeMac::m_randomSelection),
                       MakeBooleanChecker())
 ;																									;
 	return tid;
@@ -477,85 +483,93 @@ NrV2XUeMac::GetTypeId (void)
 
 
 NrV2XUeMac::NrV2XUeMac ()
-:  
-//   m_RRIvalues ({3, 11, 20, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000})
-//   m_RRIvalues ({20, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000})
-   m_RRIvalues ({}),
-   m_cphySapProvider (0),
-   m_bsrPeriodicity (MilliSeconds (1)), // ideal behavior
-   m_bsrLast (MilliSeconds (0)),
-   m_freshUlBsr (false),
-   m_harqProcessId (0),
-   m_rnti (0),
-   m_rachConfigured (false),
-   m_waitingForRaResponse (false),
-   m_slBsrPeriodicity (MilliSeconds (1)),
-   m_slBsrLast (MilliSeconds (0)),
-   m_freshSlBsr (false),   
-   m_alreadyUeSelectedSlBsr (false), //to check again whether there is a fresh SL BSR in V2V UE selected mode (Mode 4)
-   m_absSFN (0), //the absolute SFN cycle number --> incremented every 1024 frames
-   m_millisecondsFromLastAbsSFNUpdate (0), 
-//   m_nsubCHsize (10),
-   m_L_SubCh (1),
-//   m_BW_RBs (50),
-   m_maxPDB(110.0),
-   m_keepProbability (0.0),
-   m_sizeThreshold (0.2),
-   m_sensingWindow (1100),
-   m_oneShotGrant (false),
-   m_enableAdaptiveResourceReservation(false),
-   m_adaptiveResourceReservation(100, 0.5)
+  : m_RRIvalues ({}),
+    m_cphySapProvider (0),
+    m_bsrPeriodicity (MilliSeconds (1)), // ideal behavior
+    m_bsrLast (MilliSeconds (0)),
+    m_freshUlBsr (false),
+    m_harqProcessId (0),
+    m_rnti (0),
+    m_rachConfigured (false),
+    m_waitingForRaResponse (false),
+    m_slBsrPeriodicity (MilliSeconds (1)),
+    m_slBsrLast (MilliSeconds (0)),
+    m_freshSlBsr (false),
+    m_alreadyUeSelectedSlBsr (false),
+    m_absSFN (0),
+    m_millisecondsFromLastAbsSFNUpdate (0),
+    m_frameNo (0),
+    m_subframeNo (0),
+    m_nsubCHsize (10),
+    m_L_SubCh (1),
+    m_BW_RBs (50),
+    m_maxPDB(110.0),
+    m_keepProbability (0.0),
+    m_sizeThreshold (0.2),
+    m_sensingWindow (1100),
+    m_oneShotGrant (false),
+    m_slotDuration (0.001),
+    m_numerologyIndex (0),
+    m_List2Enabled (false),
+    m_mixedTraffic (false),
+    m_AdaptiveScheduling (false),
+    m_dynamicScheduling (false),
+    m_FreqReuse (false),
+    m_rsrpThreshold (-110),
+    m_debugNode (0),
+    m_outputPath (""),
+    m_enableAdaptiveResourceReservation (false),
+    m_randomSelection (false),
+    m_adaptiveResourceReservation(0, 0.5)  // Initialize with RRI=0 as a marker for "not initialized"
 {
-   NS_LOG_FUNCTION (this);
-   
-   NS_ASSERT_MSG(m_RRIvalues.size() < 16, "Maximum size of the RRI list is 16");
-   NS_ASSERT_MSG(m_keepProbability >= 0, "Keep probability must be non-negative");
-
-   m_debugNode = 0;
-
-   ReservationsInfo initEntry;
-   initEntry.UnutilizedSubchannelsRatio = {};
-   initEntry.UnutilizedReservations = 0;
-   initEntry.Reservations = 0;
-   initEntry.LatencyReselections = 0;
-   initEntry.SizeReselections = 0;
-   initEntry.CounterReselections = 0;
-   initEntry.TotalTransmissions = 0;
-
-   NodeContainer GlobalContainer = NodeContainer::GetGlobal();
-   Ptr<Node> Node;
-   for (NodeContainer::Iterator L = GlobalContainer.Begin(); L != GlobalContainer.End(); ++L) 
-   {
-     Node = *L;
-     uint32_t nodeID = Node->GetId();
-     if (nodeID > 0)
-       NrV2XUeMac::ReservationsStats.insert(std::pair<uint32_t, ReservationsInfo> (nodeID, initEntry));
-   }  
-
-   m_prevListUpdate.frameNo = 0;
-   m_prevListUpdate.subframeNo = 0;
-   m_miUlHarqProcessesPacket.resize (HARQ_PERIOD);
-   for (uint8_t i = 0; i < m_miUlHarqProcessesPacket.size (); i++)
-   {
-     Ptr<PacketBurst> pb = CreateObject <PacketBurst> ();
-     m_miUlHarqProcessesPacket.at (i) = pb;
-   }
-   m_miUlHarqProcessesPacketTimer.resize (HARQ_PERIOD, 0);
-
-   m_macSapProvider = new NistUeMemberLteMacSapProvider (this);
-   m_cmacSapProvider = new NistUeMemberLteUeCmacSapProvider (this);
-   m_uePhySapUser = new NistUeMemberLteUePhySapUser (this);
-   m_raPreambleUniformVariable = CreateObject<UniformRandomVariable> ();
-
-   m_amc = CreateObject <NistLteAmc> ();
-   m_NRamc = CreateObject <NrV2XAmc> ();
-   m_ueSelectedUniformVariable = CreateObject<UniformRandomVariable> ();
-  //m_slDiversity.status = SlDiversity::disabled;//enabled should be default!
+  NS_LOG_FUNCTION (this);
   
-   m_p1UniformVariable = CreateObject<UniformRandomVariable> ();
-   m_resUniformVariable = CreateObject<UniformRandomVariable> ();
-   m_evalKeepProb = CreateObject<UniformRandomVariable> (); // Default range is [0,1)
+  NS_ASSERT_MSG(m_keepProbability >= 0, "Keep probability must be non-negative");
 
+  m_debugNode = 0;
+
+  ReservationsInfo initEntry;
+  initEntry.UnutilizedSubchannelsRatio = {};
+  initEntry.UnutilizedReservations = 0;
+  initEntry.Reservations = 0;
+  initEntry.LatencyReselections = 0;
+  initEntry.SizeReselections = 0;
+  initEntry.CounterReselections = 0;
+  initEntry.TotalTransmissions = 0;
+
+  NodeContainer GlobalContainer = NodeContainer::GetGlobal();
+  Ptr<Node> Node;
+  for (NodeContainer::Iterator L = GlobalContainer.Begin(); L != GlobalContainer.End(); ++L) 
+  {
+    Node = *L;
+    uint32_t nodeID = Node->GetId();
+    if (nodeID > 0)
+      NrV2XUeMac::ReservationsStats.insert(std::pair<uint32_t, ReservationsInfo> (nodeID, initEntry));
+  }  
+
+  m_prevListUpdate.frameNo = 0;
+  m_prevListUpdate.subframeNo = 0;
+
+  m_miUlHarqProcessesPacket.resize (HARQ_PERIOD);
+  for (uint8_t i = 0; i < m_miUlHarqProcessesPacket.size (); i++)
+  {
+    Ptr<PacketBurst> pb = CreateObject <PacketBurst> ();
+    m_miUlHarqProcessesPacket.at (i) = pb;
+  }
+  m_miUlHarqProcessesPacketTimer.resize (HARQ_PERIOD, 0);
+  
+  m_macSapProvider = new NistUeMemberLteMacSapProvider (this);
+  m_cmacSapProvider = new NistUeMemberLteUeCmacSapProvider (this);
+  m_uePhySapUser = new NistUeMemberLteUePhySapUser (this);
+  m_raPreambleUniformVariable = CreateObject<UniformRandomVariable> ();
+
+  m_amc = CreateObject <NistLteAmc> ();
+  m_NRamc = CreateObject <NrV2XAmc> ();
+  m_ueSelectedUniformVariable = CreateObject<UniformRandomVariable> ();
+  
+  m_p1UniformVariable = CreateObject<UniformRandomVariable> ();
+  m_resUniformVariable = CreateObject<UniformRandomVariable> ();
+  m_evalKeepProb = CreateObject<UniformRandomVariable> (); // Default range is [0,1)
 }
 
 
@@ -1151,7 +1165,7 @@ NrV2XUeMac::PushNewRRIValue (uint16_t RRI)
 
   m_RRIvalues.push_back(RRI);
 
-  NS_ASSERT_MSG(m_RRIvalues.size() < 16, "Maximum size of the RRI list is 16");
+  // NS_ASSERT_MSG(m_RRIvalues.size() < 16, "Maximum size of the RRI list is 16");
 
  /* NS_LOG_INFO("Printing RRI values");
   for (std::vector<uint16_t>::iterator RRIit = m_RRIvalues.begin(); RRIit != m_RRIvalues.end(); RRIit++)
@@ -1246,6 +1260,97 @@ NrV2XUeMac::ComputeReEvaluationFrame(uint32_t frameNo, uint32_t subframeNo)
   return ReEvaluationFrame;
 }
 
+std::vector<uint16_t>
+NrV2XUeMac::GetNeighborRRI() 
+{
+    std::vector<uint16_t> neighborRRI;
+    std::map<uint32_t, uint16_t> nodeRRIs;
+
+    for (const auto& [subchannel, frameMap] : m_sensedReservedCSRMap) {
+        for (const auto& [sensedSF, reservations] : frameMap) {
+            for (const auto& res : reservations) {
+                nodeRRIs[res.nodeId] = res.RRI;
+            }
+        }
+    }
+
+    for (const auto& [nodeId, rri] : nodeRRIs) {
+        if (nodeId != m_rnti) {
+            neighborRRI.push_back(rri);
+            std::cout << "Neighbor " << nodeId << " RRI: " << rri << std::endl;
+        }
+    }
+
+    return neighborRRI;
+}
+
+double 
+NrV2XUeMac::CalculateFreeSubchannelRatio(
+    uint16_t rri,
+    uint32_t currentFrameNo,
+    uint32_t currentSubframeNo
+) 
+{
+    const uint32_t totalSubchannels = m_BW_RBs / m_nsubCHsize;
+    std::vector<uint32_t> subchannelOccupancyCount(totalSubchannels, 0);
+    uint32_t totalTimeSlots = 0;
+
+    std::cout << "\n=== CalculateFreeSubchannelRatio START ===" << std::endl;
+    std::cout << "Current frame: " << std::hex << currentFrameNo << " subframe: " << currentSubframeNo << " RRI: " << std::hex << rri << std::endl;
+    std::cout << "Total subchannels: " << std::hex << totalSubchannels << " (BW_RBs=" << std::hex << m_BW_RBs << ", subCHsize=" << std::hex << m_nsubCHsize << ")" << std::endl;
+    
+    uint32_t windowSize = rri;
+    totalTimeSlots = windowSize;
+    
+    for (const auto& [subchannel, frameMap] : m_sensedReservedCSRMap) {
+        for (const auto& [sensedSF, reservations] : frameMap) {
+            uint32_t currentSlot = (currentFrameNo % 1024) * 10 + currentSubframeNo;
+            uint32_t sensedSlot = (sensedSF.frameNo % 1024) * 10 + sensedSF.subframeNo;
+            
+            uint32_t slotsDifference;
+            if (currentSlot >= sensedSlot) {
+                slotsDifference = currentSlot - sensedSlot;
+            } else {
+                slotsDifference = (10240 + currentSlot) - sensedSlot;
+            }
+            
+            if (slotsDifference < windowSize) {
+                for (const auto& res : reservations) {
+                    uint16_t startSubchannel = res.rbStart / m_nsubCHsize;
+                    uint16_t endSubchannel = (res.rbStart + res.rbLen - 1) / m_nsubCHsize;
+                    
+                    for (uint16_t i = startSubchannel; i <= (endSubchannel < totalSubchannels ? endSubchannel : totalSubchannels - 1); i++) {
+                        subchannelOccupancyCount[i]++;
+                    }
+                }
+            }
+        }
+    }
+    
+    double totalOccupancy = 0;
+    for (uint32_t count : subchannelOccupancyCount) {
+        totalOccupancy += static_cast<double>(count) / totalTimeSlots;
+    }
+    double averageOccupancy = totalOccupancy / totalSubchannels;
+    double freeRatio = 1.0 - averageOccupancy;
+    
+    std::cout << "Average occupancy: " << std::dec << averageOccupancy
+              << " Free ratio: " << freeRatio << std::endl;
+              
+    return freeRatio;
+}
+
+uint32_t 
+NrV2XUeMac::SubtractFrames(
+    uint32_t frameNo1, 
+    uint32_t frameNo2, 
+    uint32_t subframeNo1, 
+    uint32_t subframeNo2
+) 
+{
+    return (frameNo1 * 10 + subframeNo1) - (frameNo2 * 10 + subframeNo2);
+}
+
 
 NrV2XUeMac::V2XSidelinkGrant 
 NrV2XUeMac::V2XSelectResources (uint32_t frameNo, uint32_t subframeNo, double pdb, double p_rsvp, uint8_t v2xMessageType, uint8_t v2xTrafficType, uint16_t ReselectionCounter, uint16_t PacketSize, uint16_t ReservationSize, reselectionTrigger V2Xtrigger)
@@ -1272,39 +1377,36 @@ NrV2XUeMac::V2XSelectResources (uint32_t frameNo, uint32_t subframeNo, double pd
    NS_ASSERT_MSG(pdb <= p_rsvp, "Packet Delay Budget (PDB) must be lower or equal than the reservation period");
 
    V2XGrant.m_mcs = m_slGrantMcs;
-   V2XGrant.m_RRI = p_rsvp;
 
+   if (!m_enableAdaptiveResourceReservation) {
+       V2XGrant.m_RRI = p_rsvp;
+   } else {
+       std::cout << "STARTING ADAPTIVE RESOURCE SELECTION" << std::endl;
+       double pi0 = NrV2XUeMac::CalculateFreeSubchannelRatio(p_rsvp, m_frameNo, m_subframeNo);
+       std::vector<uint16_t> neighborRRI = NrV2XUeMac::GetNeighborRRI();
 
-           
-   if (ReselectionCounter == 0)
+       std::cout << "PI 0: " << pi0;
+       std::cout << std::endl << "NEIGHBOUR RRI:" << std:: endl;
+       for (uint16_t num : neighborRRI) {
+           std::cout << static_cast<int>(num) << " ";
+       }
+       std::cout << std::endl << "--------------" << std:: endl;
+
+       uint16_t currentRRI = (m_adaptiveResourceReservation.GetRRI() == 0) ? p_rsvp : m_adaptiveResourceReservation.GetRRI();
+       uint16_t newRRI = m_adaptiveResourceReservation.UpdateRRI(currentRRI, pi0, neighborRRI);
+
+       double newPersistenceProbability = m_adaptiveResourceReservation.GetPersistenceProbability();
+
+       V2XGrant.m_RRI = newRRI;
+       std::cout << "CURRENT RRI: " << static_cast<int>(currentRRI) << " NEW RRI: " << static_cast<int>(newRRI) << " NEW PERSISTENECE PROBABLITY " <<  newPersistenceProbability << std::endl;
+       NS_LOG_INFO("Updated RRI from " << currentRRI << " to " << newRRI << " and persistence probability to " << newPersistenceProbability);
+   }
+   std::cout << "INITIAL RRI: " << p_rsvp << std::endl;
+   std::cout << "IN SELECT RESOURCES" << std::endl;
+
+    if (ReselectionCounter == 0)
    {
-      if (m_enableAdaptiveResourceReservation)
-        {
-            double pi0 = AdaptiveResourceReservation::CalculateFreeSubchannelRatio(
-                m_sensedReservedCSRMap,       
-                m_BW_RBs,                     
-                m_nsubCHsize,                 
-                m_frameNo,                    
-                m_subframeNo,
-                m_RRIvalues.front(),
-                m_slotDuration
-            );
-            std::vector<uint8_t> neighborRRI = AdaptiveResourceReservation::GetNeighborRRI(m_sensedReservedCSRMap);
-
-            m_AdaptiveResourceReservation.Update(pi0, neighborRRI);
-
-            uint8_t newRRI = m_AdaptiveResourceReservation.GetRRI();
-            double newPersistenceProbability = m_AdaptiveResourceReservation.GetPersistenceProbability();
-
-            SetRRI(newRRI);
-            SetPersistenceProbability(newPersistenceProbability);
-
-            NS_LOG_INFO("Updated RRI to " << newRRI << " and persistence probability to " << newPersistenceProbability);
-        }
-        else
-        {
-            NS_ASSERT_MSG(false, "Reselection counter = 0, check the CAM trace! Node ID " << m_rnti);
-        }
+    NS_ASSERT_MSG(false, "Reselection counter = 0, check the CAM trace! Node ID " << m_rnti);
    }
    if (p_rsvp == 0)
    {
@@ -1348,7 +1450,7 @@ NrV2XUeMac::V2XSelectResources (uint32_t frameNo, uint32_t subframeNo, double pd
    uint16_t nsubCHsize = m_nsubCHsize; // [RB]
    //uint16_t startRBSubchannel = 0;
    uint16_t NSubCh; //the total number of subchannels
-   NSubCh = std::floor(m_BW_RBs / nsubCHsize);  
+   NSubCh = std::floor(m_BW_RBs / nsubCHsize);
    uint16_t L_SubCh = m_L_SubCh, L_RBs; // the number of subchannels for the reservation
     	 
    uint32_t AdjustedPacketSize, AdjustedReservationSize;  
@@ -1819,42 +1921,67 @@ V2XSidelinkGrant V2XGrant, double T_2, uint16_t NSubCh,  uint16_t L_SubCh, uint3
 //   std::cin.get();
 
    // Create a list of the subframes to be removed from the selection window
-   std::vector<uint16_t>::iterator RRIit;
+   // std::vector<uint16_t>::iterator RRIit;
    std::list<SidelinkCommResourcePool::SubframeInfo> rm_pastTx_frames;
-   for(RRIit = m_RRIvalues.begin(); RRIit != m_RRIvalues.end(); RRIit++)
+//    for(RRIit = m_RRIvalues.begin(); RRIit != m_RRIvalues.end(); RRIit++)
+//    {
+//      uint16_t RRI_to_slot = *RRIit/m_slotDuration;
+// //     NS_LOG_DEBUG("Working with RRI: " << *RRIit << " ms, and " << RRI_to_slot << " slots at SF(" << currentSF.frameNo << ", " << currentSF.subframeNo << ")");
+//      for (pastTxIt = m_pastTxUnimore.begin (); pastTxIt != m_pastTxUnimore.end (); pastTxIt++)
+//      {
+//      //  NS_LOG_DEBUG("Past transmission at SF(" << pastTxIt->second.frameNo << ", " << pastTxIt->second.subframeNo << ")");
+//        uint16_t Q;
+//        SidelinkCommResourcePool::SubframeInfo insert_pastTx;
+//        if ((SubtractFrames( currentSF.frameNo, pastTxIt->second.frameNo, currentSF.subframeNo, pastTxIt->second.subframeNo) <= *RRIit) && (*RRIit < (T_2 + 1)) )
+//        {
+// //         Q = std::ceil( (float) (T_2 + 1)/ *RRIit );
+//          Q = std::ceil( (float) T_2/ *RRIit );
+// //         NS_LOG_DEBUG("IF clause, Q= " << Q)  ;
+//          for(uint16_t q = 1; q <= Q; q++)
+//          {
+//            insert_pastTx.subframeNo = (pastTxIt->second.subframeNo + q*RRI_to_slot)%10; // valid subframe index between 0 and 9
+//            insert_pastTx.frameNo = (pastTxIt->second.frameNo  + (pastTxIt->second.subframeNo + q*RRI_to_slot) / 10) % 1024;  // valid frame index between 0 and 1023 
+// //           NS_LOG_DEBUG("q= " << q << ", q*RRI= " << q*RRI_to_slot << " eliminate frame SF(" << insert_pastTx.frameNo << ", " << insert_pastTx.subframeNo << ")");
+//            if ( find(rm_pastTx_frames.begin(), rm_pastTx_frames.end(), insert_pastTx) ==  rm_pastTx_frames.end())
+//              rm_pastTx_frames.push_back(insert_pastTx);
+//          }
+//        }
+//        else
+//        { 
+//          Q = 1;
+// //         NS_LOG_DEBUG("ELSE clause, Q= " << Q)  ;
+//          insert_pastTx.subframeNo = (pastTxIt->second.subframeNo + Q*RRI_to_slot) % 10; // valid subframe index between 0 and 9
+//          insert_pastTx.frameNo = (pastTxIt->second.frameNo  + (pastTxIt->second.subframeNo + Q*RRI_to_slot) / 10) % 1024;  // valid frame index between 0 and 1023 
+// //         NS_LOG_DEBUG("q=Q= " << Q << ", Q*RRI= " << Q*RRI_to_slot << " eliminate frame SF(" << insert_pastTx.frameNo << ", " << insert_pastTx.subframeNo << ")");
+//          if ( find(rm_pastTx_frames.begin(), rm_pastTx_frames.end(), insert_pastTx) ==  rm_pastTx_frames.end())
+//            rm_pastTx_frames.push_back(insert_pastTx);
+//        }
+uint16_t RRI_to_slot = V2XGrant.m_RRI/m_slotDuration;
+   
+   for (pastTxIt = m_pastTxUnimore.begin (); pastTxIt != m_pastTxUnimore.end (); pastTxIt++)
    {
-     uint16_t RRI_to_slot = *RRIit/m_slotDuration;
-//     NS_LOG_DEBUG("Working with RRI: " << *RRIit << " ms, and " << RRI_to_slot << " slots at SF(" << currentSF.frameNo << ", " << currentSF.subframeNo << ")");
-     for (pastTxIt = m_pastTxUnimore.begin (); pastTxIt != m_pastTxUnimore.end (); pastTxIt++)
+     uint16_t Q;
+     SidelinkCommResourcePool::SubframeInfo insert_pastTx;
+     if ((SubtractFrames( currentSF.frameNo, pastTxIt->second.frameNo, currentSF.subframeNo, pastTxIt->second.subframeNo) <= RRI_to_slot) && (RRI_to_slot < (T_2 + 1)) )
      {
-     //  NS_LOG_DEBUG("Past transmission at SF(" << pastTxIt->second.frameNo << ", " << pastTxIt->second.subframeNo << ")");
-       uint16_t Q;
-       SidelinkCommResourcePool::SubframeInfo insert_pastTx;
-       if ((SubtractFrames( currentSF.frameNo, pastTxIt->second.frameNo, currentSF.subframeNo, pastTxIt->second.subframeNo) <= *RRIit) && (*RRIit < (T_2 + 1)) )
+       Q = std::ceil( (float) T_2/ RRI_to_slot );
+       for(uint16_t q = 1; q <= Q; q++)
        {
-//         Q = std::ceil( (float) (T_2 + 1)/ *RRIit );
-         Q = std::ceil( (float) T_2/ *RRIit );
-//         NS_LOG_DEBUG("IF clause, Q= " << Q)  ;
-         for(uint16_t q = 1; q <= Q; q++)
-         {
-           insert_pastTx.subframeNo = (pastTxIt->second.subframeNo + q*RRI_to_slot)%10; // valid subframe index between 0 and 9
-           insert_pastTx.frameNo = (pastTxIt->second.frameNo  + (pastTxIt->second.subframeNo + q*RRI_to_slot) / 10) % 1024;  // valid frame index between 0 and 1023 
-//           NS_LOG_DEBUG("q= " << q << ", q*RRI= " << q*RRI_to_slot << " eliminate frame SF(" << insert_pastTx.frameNo << ", " << insert_pastTx.subframeNo << ")");
-           if ( find(rm_pastTx_frames.begin(), rm_pastTx_frames.end(), insert_pastTx) ==  rm_pastTx_frames.end())
-             rm_pastTx_frames.push_back(insert_pastTx);
-         }
-       }
-       else
-       { 
-         Q = 1;
-//         NS_LOG_DEBUG("ELSE clause, Q= " << Q)  ;
-         insert_pastTx.subframeNo = (pastTxIt->second.subframeNo + Q*RRI_to_slot) % 10; // valid subframe index between 0 and 9
-         insert_pastTx.frameNo = (pastTxIt->second.frameNo  + (pastTxIt->second.subframeNo + Q*RRI_to_slot) / 10) % 1024;  // valid frame index between 0 and 1023 
-//         NS_LOG_DEBUG("q=Q= " << Q << ", Q*RRI= " << Q*RRI_to_slot << " eliminate frame SF(" << insert_pastTx.frameNo << ", " << insert_pastTx.subframeNo << ")");
+         insert_pastTx.subframeNo = (pastTxIt->second.subframeNo + q*RRI_to_slot)%10;
+         insert_pastTx.frameNo = (pastTxIt->second.frameNo  + (pastTxIt->second.subframeNo + q*RRI_to_slot) / 10) % 1024;
          if ( find(rm_pastTx_frames.begin(), rm_pastTx_frames.end(), insert_pastTx) ==  rm_pastTx_frames.end())
            rm_pastTx_frames.push_back(insert_pastTx);
        }
      }
+     else
+     { 
+       Q = 1;
+       insert_pastTx.subframeNo = (pastTxIt->second.subframeNo + Q*RRI_to_slot) % 10;
+       insert_pastTx.frameNo = (pastTxIt->second.frameNo  + (pastTxIt->second.subframeNo + Q*RRI_to_slot) / 10) % 1024;
+       if ( find(rm_pastTx_frames.begin(), rm_pastTx_frames.end(), insert_pastTx) ==  rm_pastTx_frames.end())
+         rm_pastTx_frames.push_back(insert_pastTx);
+     }
+     //}
    
    }
 

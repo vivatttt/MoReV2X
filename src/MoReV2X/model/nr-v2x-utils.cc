@@ -43,29 +43,23 @@ NS_LOG_COMPONENT_DEFINE ("NrV2XUtils");
 uint32_t
 SubtractFrames (uint16_t frameAhead, uint16_t frame, uint16_t subframeAhead, uint16_t subframe)
 {
-  int diff;
-//  NS_LOG_UNCOND("SF_ahead(" << frameAhead << "," << subframeAhead << ") SF(" << frame << "," << subframe << ")");
+  int32_t diff;
   NS_ASSERT_MSG((frameAhead <= 1024) && (frame <= 1024), "Frame number must be smaller than 1024");
   NS_ASSERT_MSG((subframeAhead <= 10) && (subframe <= 10), "Subframe number must be smaller than 10");
-  if (frameAhead == frame) 
-  {
-    NS_ASSERT_MSG(subframeAhead >= subframe, "The ahead frame is not actually ahead");
-    diff = (frameAhead*10 + subframeAhead) - (frame*10 + subframe);
-  }
-  else if (frameAhead < frame)
-  {
-    frameAhead = frameAhead + 1024;
-    diff = (frameAhead*10 + subframeAhead) - (frame*10 + subframe);
-  } 
-  else
-  {
-    diff = (frameAhead*10 + subframeAhead) - (frame*10 + subframe);
-  }
-//  NS_LOG_UNCOND("Difference is " << diff);
-  NS_ASSERT_MSG(diff >= 0, "SubtractFrames must return a non-negative value");
-  // The returned difference is expressed in terms of "slots", not milliseconds
-  return (uint32_t) diff;
 
+  // Convert to total slots
+  int32_t slotsAhead = frameAhead * 10 + subframeAhead;
+  int32_t slotsFrame = frame * 10 + subframe;
+  
+  // Handle frame wrapping
+  if (slotsAhead < slotsFrame) {
+    slotsAhead += 10240; // 1024 frames * 10 subframes
+  }
+  
+  diff = slotsAhead - slotsFrame;
+  
+  NS_ASSERT_MSG(diff >= 0, "SubtractFrames must return a non-negative value");
+  return (uint32_t) diff;
 }
 
 
@@ -122,8 +116,10 @@ ComputeResidualCSRs (std::map<uint16_t,std::list<SidelinkCommResourcePool::Subfr
    std::map<uint16_t,std::list<SidelinkCommResourcePool::SubframeInfo> >::iterator mapIt;
    for (mapIt = L1.begin (); mapIt != L1.end (); mapIt++)
       {
+
           nCSR += (*mapIt).second.size ();
       }  
+    std::cout << nCSR << std::endl;
    return nCSR;
 }
 

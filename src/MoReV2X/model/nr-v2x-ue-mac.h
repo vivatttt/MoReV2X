@@ -42,7 +42,7 @@
 #include <ns3/packet-burst.h>
 #include "ns3/traced-value.h"
 #include "ns3/trace-source-accessor.h"
-#include "aoi-aware-congestion-control/adaptive-rri-algorithm.h"
+#include "aoi-aware-congestion-control.h"
 
 #include <cctype>
 namespace ns3 {
@@ -66,7 +66,6 @@ public:
   void  SetNistLteUeCmacSapUser (NistLteUeCmacSapUser* s);
   NistLteUeCmacSapProvider*  GetNistLteUeCmacSapProvider (void);
 
-  
   /**
    * set the CPHY SAP this MAC should use to interact with the PHY
    *
@@ -169,6 +168,10 @@ public:
   */
   void CopySubchannelsMap (std::map < uint16_t, std::vector < std::pair <double, double>>> inputMap);
 
+  uint16_t GetCurrentAdaptiveRRI() const {
+    return m_adaptiveResourceReservation.GetRRI();
+  }
+
 private:
 
   /**
@@ -231,6 +234,7 @@ private:
 
   // added to handle adaptive rri algorithm
   bool m_enableAdaptiveResourceReservation;
+  bool m_randomSelection;
   AdaptiveResourceReservation m_adaptiveResourceReservation;
 
 private:
@@ -307,8 +311,6 @@ private:
   uint16_t m_BW_RBs;
   double m_slotDuration;
   uint16_t m_numerologyIndex;
-
-  bool m_randomSelection; 
 
   std::map <SidelinkLcIdentifier, NistLteMacSapProvider::NistReportBufferNistStatusParameters> m_slBsrReceived; // BSR received from RLC (the last one)
 
@@ -697,6 +699,16 @@ private:
   */
   void DoStoreTxInfo (SidelinkCommResourcePool::SubframeInfo subframe, uint16_t rbStart, uint16_t rbLen);
 
+  double CalculateFreeSubchannelRatio(uint16_t rri, uint32_t currentFrameNo, uint32_t currentSubframeNo);
+  
+  std::vector<uint16_t> GetNeighborRRI();
+  
+  uint32_t SubtractFrames(
+    uint32_t frameNo1, 
+    uint32_t frameNo2, 
+    uint32_t subframeNo1, 
+    uint32_t subframeNo2
+  );
 };
 
 } // namespace ns3

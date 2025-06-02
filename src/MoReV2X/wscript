@@ -75,6 +75,7 @@ def build(bld):
         'model/lte-node-state.cc',
         'model/nr-v2x-amc.cc',
         'model/nr-v2x-utils.cc',
+        'model/aoi-aware-congestion-control.cc',
         ]
 
     module_test = bld.create_ns3_module_test_library('MoReV2X')
@@ -156,6 +157,7 @@ def build(bld):
         'model/lte-node-state.h',
         'model/nr-v2x-amc.h',
         'model/nr-v2x-utils.h',
+        'model/aoi-aware-congestion-control.h',
         ]
 
     if (bld.env['ENABLE_EXAMPLES']):

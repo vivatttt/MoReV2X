@@ -68,17 +68,17 @@ namespace ns3 {
         SubframeInfo res;
         uint32_t tmp1 = 10 * (lhs.frameNo % 1024) + lhs.subframeNo % 10;
         uint32_t tmp2 = 10 * (rhs.frameNo % 1024) + rhs.subframeNo % 10;
-        uint32_t tmpRes = 2;
+        uint32_t tmpRes;
+        
         if (tmp1 >= tmp2)
-          {
-             tmpRes = tmp1 - tmp2; // the two SF locations belong to the same SFN cycle
-
-          }
+        {
+          tmpRes = tmp1 - tmp2; // the two SF locations belong to the same SFN cycle
+        }
         else 
-          {
-             tmpRes = tmp1 + (10249 - tmp2);
-
-          }
+        {
+          tmpRes = tmp1 + (10240 - tmp2); // 1024 frames * 10 subframes
+        }
+        
         res.subframeNo = tmpRes % 10;
         res.frameNo = (tmpRes / 10) % 1024;
         

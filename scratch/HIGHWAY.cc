@@ -191,11 +191,30 @@ UdpClient::Send (void)
 
         if (avgRRI)
           v2xTag.SetPrsvp ((double) Aperiodic_Tgen_c[nodeId-1]*2); // average RRI 
-        else
-          v2xTag.SetPrsvp ((double) Aperiodic_Tgen_c[nodeId-1]); // minimum RRI
+        else {
+          // Get the MAC layer to check if adaptive RRI is enabled
+          Ptr<NrV2XUeMac> ueMac = currentNode->GetObject<NrV2XUeMac>();
+          if (ueMac) {
+            BooleanValue adaptiveRRI;
+            ueMac->GetAttribute("EnableAdaptiveResourceReservation", adaptiveRRI);
+            if (adaptiveRRI.Get()) {
+                // First calculate new RRI value
+                double newRRI = ueMac->GetCurrentAdaptiveRRI();
+                // Then set it
+                v2xTag.SetPrsvp(newRRI);
+                // Then log it
+                NS_LOG_UNCOND("Udp: UE " << nodeId << " transmitting packet with size: " << m_size+35 << " B and reserving resources using " << ReservationSize+35 << "B. Adapted RRI " << newRRI << " ms. Next packet in " << T_gen << " ms");
+            } else {
+                v2xTag.SetPrsvp ((double) Aperiodic_Tgen_c[nodeId-1]); // minimum RRI
+                NS_LOG_UNCOND("Udp: UE " << nodeId << " transmitting packet with size: " << m_size+35 << " B and reserving resources using " << ReservationSize+35 << "B. Adapted RRI " << v2xTag.GetPrsvp() << " ms. Next packet in " << T_gen << " ms");
+            }
+          } else {
+            v2xTag.SetPrsvp ((double) Aperiodic_Tgen_c[nodeId-1]); // minimum RRI
+            NS_LOG_UNCOND("Udp: UE " << nodeId << " transmitting packet with size: " << m_size+35 << " B and reserving resources using " << ReservationSize+35 << "B. Adapted RRI " << v2xTag.GetPrsvp() << " ms. Next packet in " << T_gen << " ms");
+          }
+        }
 
         v2xTag.SetReservationSize((uint16_t) ReservationSize + 35);
-        NS_LOG_UNCOND("Udp: UE " << nodeId << " transmitting packet with size: " << m_size+35 << " B and reserving resources using " << ReservationSize+35 << "B. RRI " << v2xTag.GetPrsvp() << " ms. Next packet in " << T_gen << " ms");
       }
      // std::cin.get();
       v2xTag.SetPacketSize((uint16_t) m_size + 35);
@@ -525,19 +544,19 @@ main (int argc, char *argv[])
   uint32_t mcs = 13; // The Modulation and Coding Scheme
   uint32_t pscchLength = 8;
   std::string period="sf40";
-  simTime = 30;
+  simTime = 100;
   double ueTxPower = 23.0; // [dBm]
-  uint32_t ueCount = 4; // Number of V-UEs 
+  uint32_t ueCount = 5; // Number of V-UEs 
   bool verbose = true;
   enableUDPfiles = false;
   //Default configuration
   uint16_t OFDM_numerology = 0; //Default value is 0 = 15 KHz SCS
   uint16_t channelBW = 10; //In MHz, default
   uint16_t channelBW_RBs;
-  uint32_t subchannelSize = 10; //Default
+  uint32_t subchannelSize = 50; //Default
   uint32_t highwayLength = 5000;
 
-  bool IBE = true;
+  bool IBE = false;
 
   std::string outputPath;
 
@@ -563,7 +582,7 @@ main (int argc, char *argv[])
 //  AperiodicPKTs_Size = packetSize;  // Can be set with a different dimension too.
 
   bool PeriodicTraffic = false;
-  bool AperiodicTraffic = false;
+  bool AperiodicTraffic = true;
   bool MixedTraffic = false;
   int PeriodicPercentage = 0;
 
@@ -891,6 +910,7 @@ main (int argc, char *argv[])
   Config::SetDefault ("ns3::NrV2XUeMac::AdaptiveScheduling", BooleanValue (AdaptiveSchedulingMode2));
   Config::SetDefault ("ns3::NrV2XUeMac::UMHReEvaluation", BooleanValue (UMH_ReEvaluation));
   Config::SetDefault ("ns3::NrV2XUeMac::FrequencyReuse", BooleanValue (FrequencyReuse));
+  Config::SetDefault ("ns3::NrV2XUeMac::EnableAdaptiveResourceReservation", BooleanValue (true));
 
 
   // Configure Power Control and Phy layer
@@ -1288,6 +1308,7 @@ main (int argc, char *argv[])
   //mobility.SetPositionAllocator (positionAlloc);
 
   NS_LOG_INFO ("Installing UE network devices...");
+  std::cout << "aboba";
   NetDeviceContainer ueDevs = lteHelper->InstallUeDevice (ueResponders);
 
   for (NodeContainer::Iterator L = ueResponders.Begin(); L != ueResponders.End(); ++L)
@@ -1303,37 +1324,46 @@ main (int argc, char *argv[])
 
     if (PeriodicTraffic)
     {
-      for (uint16_t rri = 1; rri <= std::numeric_limits<uint16_t>::max(); ++rri) {
+      // mac->PushNewRRIValue(10);
+      // mac->PushNewRRIValue(100);
+      // mac->PushNewRRIValue(200);
+      for (uint16_t rri = 1; rri < 101; ++rri) {
         mac->PushNewRRIValue(rri);
       }
     }
     else if (AperiodicTraffic)
     {
-      if (avgRRI) 
-      {
-        mac->PushNewRRIValue(RndExp->GetMean()*2);
-        mac->PushNewRRIValue(RndExp_1->GetMean()*2);
+      for (uint16_t rri = 1; rri < 101; ++rri) {
+        mac->PushNewRRIValue(rri);
       }
-      else
-      {
-        mac->PushNewRRIValue(RndExp->GetMean());
-        mac->PushNewRRIValue(RndExp_1->GetMean());
-      }
+      // if (avgRRI) 
+      // {
+      //   mac->PushNewRRIValue(RndExp->GetMean()*2);
+      //   mac->PushNewRRIValue(RndExp_1->GetMean()*2);
+      // }
+      // else
+      // {
+      //   mac->PushNewRRIValue(RndExp->GetMean());
+      //   mac->PushNewRRIValue(RndExp_1->GetMean());
+      // }
     }
     else  // Mixed traffic
     {
-      mac->PushNewRRIValue(100);
+      for (uint16_t rri = 1; rri < 101; ++rri) {
+        mac->PushNewRRIValue(rri);
+      }
+      // mac->PushNewRRIValue(100);
 //      mac->PushNewRRIValue(20);
-      if (avgRRI) 
-      {
-        mac->PushNewRRIValue(RndExp->GetMean()*2);
-        mac->PushNewRRIValue(RndExp_1->GetMean()*2);
-      }
-      else
-      {
-        mac->PushNewRRIValue(RndExp->GetMean());
-        mac->PushNewRRIValue(RndExp_1->GetMean());
-      }
+      // if (avgRRI) 
+      // {
+      //   mac->PushNewRRIValue(RndExp->GetMean()*2);
+      //   mac->PushNewRRIValue(RndExp_1->GetMean()*2);
+      // }
+      // else
+      // {
+      //   mac->PushNewRRIValue(RndExp->GetMean());
+      //   mac->PushNewRRIValue(RndExp_1->GetMean());
+      // }
     }
 //      mac->PushNewRRIValue(100);
 //      mac->PushNewRRIValue(20);
